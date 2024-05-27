@@ -19,6 +19,11 @@ public class CameraController : MonoBehaviour
     }
     void Update()
     {
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            Application.Quit();
+        }
+
         if (Input.GetKey(KeyCode.R))
         {
             transform.position = new Vector3(5, 2, -5);

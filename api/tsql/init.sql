@@ -414,8 +414,6 @@ AS BEGIN
 	ELSE
 	BEGIN
 		DECLARE @meshString AS NVARCHAR(max);
-		--DECLARE @point AS [Point3D];
-		--SET @point = [dbo].[getPointBeyondMinimalMeshBox](@meshId);
 
 		with p1 as (
 			SELECT p.coordinates as coords, t.point_id1 as pid, t.id as tid
