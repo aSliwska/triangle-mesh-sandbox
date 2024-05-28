@@ -1,0 +1,1 @@
+hold left alt and click void to deselect everything
