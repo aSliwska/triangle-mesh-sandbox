@@ -325,7 +325,7 @@ namespace TriangleMeshNamespace
             orderedMesh.Add(0, mesh[0].Select(p => p.coords).ToList());
             edgeQueue.Enqueue((mesh[0][0].pId, mesh[0][1].pId));
             edgeQueue.Enqueue((mesh[0][1].pId, mesh[0][2].pId));
-            edgeQueue.Enqueue((mesh[0][0].pId, mesh[0][2].pId));
+            edgeQueue.Enqueue((mesh[0][2].pId, mesh[0][0].pId));
 
             while (edgeQueue.Count > 0)
             {
@@ -346,7 +346,7 @@ namespace TriangleMeshNamespace
                         List<(int pId1, int pId2)> edges = [
                             (triangle[0].pId, triangle[1].pId),
                             (triangle[1].pId, triangle[2].pId),
-                            (triangle[0].pId, triangle[2].pId)
+                            (triangle[2].pId, triangle[0].pId)
                         ];
 
                         // flip the order of vertices if its the same as the one from queue
@@ -354,18 +354,22 @@ namespace TriangleMeshNamespace
                         {
                             triangle.Reverse();
                             edges.Remove(curEdge);
+
+                            // add the other edges to queue (but reversed)
+                            edgeQueue.Enqueue((edges[0].pId2, edges[0].pId1));
+                            edgeQueue.Enqueue((edges[1].pId2, edges[1].pId1));
                         }
                         else
                         {
                             edges.Remove((curEdge.pId2, curEdge.pId1));
+
+                            // add the other edges to queue
+                            edgeQueue.Enqueue(edges[0]);
+                            edgeQueue.Enqueue(edges[1]);
                         }
 
                         // add triangle to orderedMesh
                         orderedMesh.Add(tId, triangle.Select(p => p.coords).ToList());
-
-                        // add the other edges to queue
-                        edgeQueue.Enqueue(edges[0]);
-                        edgeQueue.Enqueue(edges[1]);
                     }
                 }
             }

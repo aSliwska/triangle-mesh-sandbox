@@ -338,6 +338,7 @@ AS BEGIN
 		select null
 		from [Triangle]
 		where @pointId in (point_id1, point_id2, point_id3)
+		and id = @triangleId
 	))
 	begin
 		select 1;

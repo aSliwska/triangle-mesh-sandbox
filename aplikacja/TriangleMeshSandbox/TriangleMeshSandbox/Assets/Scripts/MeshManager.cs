@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.VisualScripting;
@@ -16,18 +15,19 @@ public class MeshManager : MonoBehaviour
 
     // these are used before the class awakens, so they need to be declared early
     private ObjectToApiTwoWayDictionary objectMap = new ObjectToApiTwoWayDictionary();
-    private List<Point> dbPoints = new List<Point>();
     private List<Triangle> dbTriangles = new List<Triangle>();
     private List<TriangleMeshAPI.Mesh> dbMeshes = new List<TriangleMeshAPI.Mesh>();
 
 
     private HashSet<GameObject> selectedObjects;
+    private MeshSelector selectedMeshes;
     private (GameObject obj, Color color) mainHoverTarget;
     private HashSet<(GameObject obj, Color color)> hoverNeighboursObjects;
 
-    private Color blue, lightBlue, red, white, green;
-
+    private Color blue, lightBlue, red, white, green, orange;
     private GameObject previewPoint;
+    private bool isInMeshMode;
+    private int currentMeshIndex;
 
     private class ObjectToApiTwoWayDictionary
     {
@@ -69,79 +69,166 @@ public class MeshManager : MonoBehaviour
         {
             return gameObjectToApiObjectMap[gameObject];
         }
+
+        public void destroyEverything()
+        {
+            foreach (GameObject obj in gameObjectToApiObjectMap.Keys)
+            {
+                Destroy(obj);
+            }
+
+            gameObjectToApiObjectMap = new Dictionary<GameObject, MeshObject>();
+            apiObjectToGameObjectMap = new Dictionary<MeshObject, GameObject>();
+        }
     }
 
+    private class MeshSelector
+    {
+        private Dictionary<Triangle, int> triangleCounts;
+        private HashSet<TriangleMeshAPI.Mesh> selectedMeshes;
+
+        public MeshSelector()
+        {
+            triangleCounts = new Dictionary<Triangle, int>();
+            selectedMeshes = new HashSet<TriangleMeshAPI.Mesh>();
+        }
+
+        public void Add(TriangleMeshAPI.Mesh mesh)
+        {
+            if (selectedMeshes.Contains(mesh))
+            {
+                return;
+            }
+
+            selectedMeshes.Add(mesh);
+
+            foreach (Triangle triangle in mesh.triangles)
+            {
+                if (triangleCounts.ContainsKey(triangle))
+                {
+                    triangleCounts[triangle] += 1;
+                }
+                else
+                {
+                    triangleCounts.Add(triangle, 1);
+                }
+            }
+        }
+
+        public void Remove(TriangleMeshAPI.Mesh mesh)
+        {
+            if (!selectedMeshes.Contains(mesh))
+            {
+                return;
+            }
+
+            selectedMeshes.Remove(mesh);
+
+            foreach (Triangle triangle in mesh.triangles)
+            {
+                if (triangleCounts.ContainsKey(triangle))
+                {
+                    triangleCounts[triangle] -= 1;
+
+                    if (triangleCounts[triangle] < 1)
+                    {
+                        triangleCounts.Remove(triangle);
+                    }
+                }
+            }
+        }
+
+        public void Clear()
+        {
+            selectedMeshes.Clear();
+            triangleCounts.Clear();
+        }
+
+        public bool Contains(TriangleMeshAPI.Mesh mesh)
+        {
+            return selectedMeshes.Contains(mesh);
+        }
+        
+        public List<Triangle> getTriangles()
+        {
+            return triangleCounts.Keys.ToList();
+        }
+
+        public HashSet<TriangleMeshAPI.Mesh> getMeshes()
+        {
+            return selectedMeshes;
+        }
+    }
+  
+    /////// drawing related methods
 
     void Awake()
     {
         m_Camera = Camera.main;
         selectedObjects = new HashSet<GameObject>();
+        selectedMeshes = new MeshSelector();
         mainHoverTarget = (null, white);
         hoverNeighboursObjects = new HashSet<(GameObject obj, Color color)>();
         previewPoint = null;
+        isInMeshMode = false;
 
         blue = new Color(0.259f, 0.466f, 0.679f, 0.251f);
         lightBlue = new Color(0.545f, 0.815f, 0.924f, 0.251f);
         red = new Color(1f, 0.4f, 0.4f, 0.251f);
         white = new Color(1f, 1f, 1f, 0.251f);
         green = new Color(0.466f, 0.717f, 0.369f, 0.251f);
+        orange = new Color(0.877f, 0.576f, 0.186f, 0.251f);
     }
 
     void Update()
     {
-        if (Input.GetMouseButtonDown(0))
+        if (Input.GetKeyDown(KeyCode.LeftArrow) && isInMeshMode)
+        {
+            cycleMeshes(mod(currentMeshIndex - 1, dbMeshes.Count));
+        }
+        else if (Input.GetKeyDown(KeyCode.RightArrow) && isInMeshMode)
+        {
+            cycleMeshes(mod(currentMeshIndex + 1, dbMeshes.Count));
+        }
+        else if (Input.GetMouseButtonDown(0))
         {
             // select coloring logic
 
-            Vector3 mousePosition = Input.mousePosition;
-            Ray ray = m_Camera.ScreenPointToRay(mousePosition);
+            Ray ray = m_Camera.ScreenPointToRay(Input.mousePosition);
             if (Physics.Raycast(ray, out RaycastHit hit))
             {
-                
+                if (mainHoverTarget.obj != null)
+                {
+                    uncolorHover();
+                    hoverNeighboursObjects.Clear();
+                }
+
                 if (Input.GetKey(KeyCode.LeftAlt))
                 {
-                    // remove selection
-                    hit.collider.gameObject.GetComponent<Renderer>().material.color = white;
-                    mainHoverTarget.color = white;
-                    selectedObjects.Remove(hit.collider.gameObject);
+                    deselectObject(hit.collider.gameObject);
                 }
                 else
                 {
-                    // add selection
-                    hit.collider.gameObject.GetComponent<Renderer>().material.color = red;
-                    mainHoverTarget.color = red;
-                    selectedObjects.Add(hit.collider.gameObject);
+                    selectObject(hit.collider.gameObject);
                 }
             }
             else if (Input.GetKey(KeyCode.LeftAlt))
             {
-                // remove all selections
-                foreach (var obj in selectedObjects)
-                {
-                    obj.GetComponent<Renderer>().material.color = white;
-                }
-                selectedObjects.Clear();
+                deselectEverything();
             }
         }
         else if (!Input.GetMouseButton(1))
         {
             // hover coloring logic
 
-            Vector3 mousePosition = Input.mousePosition;
-            Ray ray = m_Camera.ScreenPointToRay(mousePosition);
+            Ray ray = m_Camera.ScreenPointToRay(Input.mousePosition);
             if (Physics.Raycast(ray, out RaycastHit hit))
             {
                 if (mainHoverTarget.obj != hit.collider.gameObject)
                 {
-                    // uncolor previous hover targets to their original color
                     if (mainHoverTarget.obj != null)
                     {
-                        mainHoverTarget.obj.GetComponent<Renderer>().material.color = mainHoverTarget.color;
-
-                        foreach (var neighbour in hoverNeighboursObjects)
-                        {
-                            neighbour.obj.GetComponent<Renderer>().material.color = neighbour.color;
-                        }
+                        uncolorHover();
                         hoverNeighboursObjects.Clear();
                     }
 
@@ -203,19 +290,152 @@ public class MeshManager : MonoBehaviour
             }
             else if (mainHoverTarget.obj != null)
             {
-                // uncolor previous hover targets to their original color
-                foreach (var neighbour in hoverNeighboursObjects)
-                {
-                    neighbour.obj.GetComponent<Renderer>().material.color = neighbour.color;
-                }
-                mainHoverTarget.obj.GetComponent<Renderer>().material.color = mainHoverTarget.color;
+                uncolorHover();
 
                 // reset hover targets
                 mainHoverTarget = (null, white);
                 hoverNeighboursObjects.Clear();
+
+                // set text in UI
+                notifyUiObserverAboutHoverChange(null);
             }
         }
     }
+
+    ////// 
+
+    private void cycleMeshes(int nextMeshIndex)
+    {
+        // uncolor previous mesh
+        if (!selectedMeshes.Contains(dbMeshes[currentMeshIndex]))
+        {
+            // get all triangles that should be red
+            List<Triangle> selectedTriangles = selectedMeshes.getTriangles();
+
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                if (selectedTriangles.Contains(triangle))
+                {
+                    objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = red;
+                }
+                else
+                {
+                    objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = white;
+                }
+            }
+        }
+
+        // change index
+        currentMeshIndex = nextMeshIndex;
+
+        // color next mesh
+        if (selectedMeshes.Contains(dbMeshes[currentMeshIndex]))
+        {
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = red;
+            }
+        }
+        else
+        {
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = orange; 
+            }
+        }
+
+        // recolor hover next frame
+        if (mainHoverTarget.obj != null)
+        {
+            uncolorHover();
+            hoverNeighboursObjects.Clear();
+            mainHoverTarget.obj = null;
+        }
+    }
+
+    private void addTriangleAsNeighbourIfHasPoint(Triangle triangle, Point point)
+    {
+        if (point == triangle.a || point == triangle.b || point == triangle.c)
+        {
+            GameObject obj = objectMap.get(triangle);
+            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
+            obj = objectMap.get(triangle.a);
+            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
+            obj = objectMap.get(triangle.b);
+            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
+            obj = objectMap.get(triangle.c);
+            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
+        }
+    }
+
+    private void deselectObject(GameObject obj)
+    {
+        if (!isInMeshMode || objectMap.get(obj) is Point)
+        {
+            obj.GetComponent<Renderer>().material.color = white;
+            mainHoverTarget.color = white;
+            selectedObjects.Remove(obj);
+        }
+        else if (selectedMeshes.Contains(dbMeshes[currentMeshIndex]) && dbMeshes[currentMeshIndex].triangles.Contains(objectMap.get(obj)))
+        {
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = orange;
+            }
+            mainHoverTarget.color = orange;
+            selectedMeshes.Remove(dbMeshes[currentMeshIndex]);
+        }
+    }
+
+    private void selectObject(GameObject obj)
+    {
+        if (!isInMeshMode || objectMap.get(obj) is Point)
+        {
+            obj.GetComponent<Renderer>().material.color = red;
+            mainHoverTarget.color = red;
+            selectedObjects.Add(obj);
+        }
+        else if (!selectedMeshes.Contains(dbMeshes[currentMeshIndex]) && dbMeshes[currentMeshIndex].triangles.Contains(objectMap.get(obj)))
+        {
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = red;
+            }
+            mainHoverTarget.color = red;
+            selectedMeshes.Add(dbMeshes[currentMeshIndex]);
+        }
+    }
+
+    private void deselectEverything()
+    {
+        foreach (var obj in selectedObjects)
+        {
+            obj.GetComponent<Renderer>().material.color = white;
+        }
+        selectedObjects.Clear();
+
+        if (isInMeshMode)
+        {
+            foreach (Triangle triangle in selectedMeshes.getTriangles())
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = white;
+            }
+
+            selectedMeshes.Clear();
+        }
+    }
+
+    private void uncolorHover()
+    {
+        mainHoverTarget.obj.GetComponent<Renderer>().material.color = mainHoverTarget.color;
+
+        foreach (var neighbour in hoverNeighboursObjects)
+        {
+            neighbour.obj.GetComponent<Renderer>().material.color = neighbour.color;
+        }
+    }
+
+    ///// ui related methods
 
     public void setUiObserver(UIEventManager uiObserver)
     {
@@ -232,6 +452,7 @@ public class MeshManager : MonoBehaviour
 
     public void createTriangles(List<Triangle> dbTriangles)
     {
+        this.dbTriangles = dbTriangles;
         foreach (Triangle t in dbTriangles)
         {
             addTriangle(t);
@@ -245,13 +466,14 @@ public class MeshManager : MonoBehaviour
     
     public List<MeshObject> getSelectedObjects()
     {
-        return selectedObjects.Select(gameObject => objectMap.get(gameObject)).ToList();
+        List<MeshObject> allSelectedObjects = new List<MeshObject>();
+        allSelectedObjects.AddRange(selectedMeshes.getMeshes());
+        allSelectedObjects.AddRange(selectedObjects.Select(gameObject => objectMap.get(gameObject)));
+        return allSelectedObjects;
     }
 
     public void addPoint(Point point)
     {
-        dbPoints.Add(point);
-
         GameObject obj = Instantiate(pointPrefab, new Vector3((float)point.x, (float)point.y, (float)point.z), Quaternion.identity);
         
         objectMap.add(obj, point);
@@ -259,8 +481,6 @@ public class MeshManager : MonoBehaviour
 
     public void addTriangle(Triangle triangle)
     {
-        dbTriangles.Add(triangle);
-
         GameObject obj = new GameObject();
         MeshRenderer renderer = obj.AddComponent<MeshRenderer>();
         MeshFilter filter = obj.AddComponent<MeshFilter>();
@@ -302,6 +522,40 @@ public class MeshManager : MonoBehaviour
         }
     }
 
+    public void toggleMeshMode(bool value)
+    {
+        deselectEverything();
+
+        isInMeshMode = value;
+
+        if (isInMeshMode)
+        {
+            currentMeshIndex = 0;
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = orange;
+            }
+        }
+        else
+        {
+            foreach (Triangle triangle in dbMeshes[currentMeshIndex].triangles)
+            {
+                objectMap.get(triangle).GetComponent<MeshRenderer>().material.color = white;
+            }
+        }
+    }
+
+    public void nuke()
+    {
+        hoverNeighboursObjects.Clear();
+        mainHoverTarget = (null, white);
+        selectedMeshes.Clear();
+        selectedObjects.Clear();
+        dbMeshes = new List<TriangleMeshAPI.Mesh>();
+        dbTriangles = new List<Triangle>();
+        objectMap.destroyEverything();
+    }
+
     //////
 
     private void notifyUiObserverAboutHoverChange(MeshObject hoveredObject)
@@ -309,18 +563,10 @@ public class MeshManager : MonoBehaviour
         uiObserver.updateHoverText(hoveredObject);
     }
 
-    private void addTriangleAsNeighbourIfHasPoint(Triangle triangle, Point point)
+    private int mod(int x, int m)
     {
-        if (point == triangle.a || point == triangle.b || point == triangle.c)
-        {
-            GameObject obj = objectMap.get(triangle);
-            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
-            obj = objectMap.get(triangle.a);
-            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
-            obj = objectMap.get(triangle.b);
-            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
-            obj = objectMap.get(triangle.c);
-            hoverNeighboursObjects.Add((obj, obj.GetComponent<Renderer>().material.color));
-        }
+        int r = x % m;
+        return r < 0 ? r + m : r;
     }
+    
 }

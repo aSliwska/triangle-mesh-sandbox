@@ -178,13 +178,14 @@ public class TriangleMeshAPI
 
     public int insertMesh(List<int> triangleIds)
     {
-        using (TransactionScope transaction = new TransactionScope())
+        int id;
+        using (SqlConnection connection = new SqlConnection(this.connectionString))
         {
-            using (SqlConnection connection = new SqlConnection(this.connectionString))
-            {
+            using (TransactionScope transaction = new TransactionScope())
+            {   
                 connection.Open();
             
-                int id = createNewMesh(connection);
+                id = createNewMesh(connection);
 
                 if (triangleIds.Count != 0)
                 {
@@ -192,17 +193,18 @@ public class TriangleMeshAPI
                 }
 
                 transaction.Complete();
-                return id;
             }
         }
+        return id;
     }
 
     // returns updated list of meshes
     public List<Mesh> mergeMeshes(List<int> meshIds, List<Triangle> allTriangles)
     {
-        using (TransactionScope transaction = new TransactionScope())
+        List<Mesh> meshes;
+        using (SqlConnection connection = new SqlConnection(this.connectionString))
         {
-            using (SqlConnection connection = new SqlConnection(this.connectionString))
+            using (TransactionScope transaction = new TransactionScope())
             {
                 connection.Open();
 
@@ -214,20 +216,23 @@ public class TriangleMeshAPI
                     insertTrianglesIntoMesh(connection, triangleIds, meshId);
                 }
                 
-                List<Mesh> meshes = fetchMeshes(connection, allTriangles);
+                meshes = fetchMeshes(connection, allTriangles);
 
                 transaction.Complete();
-                return meshes;
             }
         }
+        return meshes;
     }
 
     // updates lists of points and triangles and meshes
     public void deletePoints(List<int> pointIds, out List<Point> points, out List<Triangle> triangles, out List<Mesh> meshes)
     {
-        using (TransactionScope transaction = new TransactionScope())
+        List<Point> updatedPoints;
+        List<Triangle> updatedTriangles;
+        List<Mesh> updatedMeshes;
+        using (SqlConnection connection = new SqlConnection(this.connectionString))
         {
-            using (SqlConnection connection = new SqlConnection(this.connectionString))
+            using (TransactionScope transaction = new TransactionScope())
             {
                 connection.Open();
 
@@ -238,25 +243,26 @@ public class TriangleMeshAPI
                     command.ExecuteNonQuery();
                 }
 
-                List<Point> updatedPoints = fetchPoints(connection);
-                List<Triangle> updatedTriangles = fetchTriangles(connection, updatedPoints);
-                List<Mesh> updatedMeshes = fetchMeshes(connection, updatedTriangles);
+                updatedPoints = fetchPoints(connection);
+                updatedTriangles = fetchTriangles(connection, updatedPoints);
+                updatedMeshes = fetchMeshes(connection, updatedTriangles);
 
                 transaction.Complete();
-
-                points = updatedPoints;
-                triangles = updatedTriangles;
-                meshes = updatedMeshes;
             }
         }
+        points = updatedPoints;
+        triangles = updatedTriangles;
+        meshes = updatedMeshes;
     }
 
     // updates list of triangles and meshes
     public void deleteTriangles(List<int> triangleIds, List<Point> points, out List<Triangle> triangles, out List<Mesh> meshes)
     {
-        using (TransactionScope transaction = new TransactionScope())
+        List<Triangle> updatedTriangles;
+        List<Mesh> updatedMeshes;
+        using (SqlConnection connection = new SqlConnection(this.connectionString))
         {
-            using (SqlConnection connection = new SqlConnection(this.connectionString))
+            using (TransactionScope transaction = new TransactionScope())
             {
                 connection.Open();
 
@@ -267,15 +273,14 @@ public class TriangleMeshAPI
                     command.ExecuteNonQuery();
                 }
 
-                List<Triangle> updatedTriangles = fetchTriangles(connection, points);
-                List<Mesh> updatedMeshes = fetchMeshes(connection, updatedTriangles);
+                updatedTriangles = fetchTriangles(connection, points);
+                updatedMeshes = fetchMeshes(connection, updatedTriangles);
 
                 transaction.Complete();
-
-                triangles = updatedTriangles;
-                meshes = updatedMeshes;
             }
         }
+        triangles = updatedTriangles;
+        meshes = updatedMeshes;
     }
 
     public void deleteMeshes(List<int> meshIds)
